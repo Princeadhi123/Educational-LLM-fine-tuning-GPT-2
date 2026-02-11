@@ -15,19 +15,19 @@
 mkdir -p logs
 
 # 1. Environment
-module load pytorch
 source /projappl/project_2015971/my_env/bin/activate
+module load pytorch
 
 # Print job info
 echo "Job ID: $SLURM_JOB_ID"
 echo "Node: $SLURM_NODELIST"
 echo "GPUs: $CUDA_VISIBLE_DEVICES"
+echo "Python: $(which python)"
 echo "Start: $(date)"
 
 # 2. Run with Distributed Data Parallel (2 GPUs)
-# torchrun launches 2 processes, one per GPU
-# HuggingFace Trainer auto-detects the distributed environment
-srun torchrun \
+# Use python -m torch.distributed.run instead of torchrun (more portable)
+python -m torch.distributed.run \
     --standalone \
     --nnodes=1 \
     --nproc_per_node=2 \
