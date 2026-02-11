@@ -166,7 +166,7 @@ def main():
     if torch.cuda.is_available():
         deviceName = torch.cuda.get_device_name(0)
         print(f"Using GPU: {deviceName}")
-        print(f"  VRAM: {torch.cuda.get_device_properties(0).total_mem / 1e9:.1f} GB")
+        print(f"  VRAM: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
     elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
         print("Using Apple MPS (Metal Performance Shaders)")
     else:
