@@ -1,0 +1,4 @@
+models/checkpoints/
+models/**/model.safetensors
+logs/
+data/processed/
