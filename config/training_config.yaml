@@ -30,8 +30,8 @@ training:
   outputDirectory: "models/checkpoints"
   loggingDirectory: "logs"
   numberOfEpochs: 5
-  batchSize: 2                        # Per-device batch size (reduced for larger LoRA)
-  gradientAccumulationSteps: 8        # Effective batch = batchSize * gradientAccumulation = 16
+  batchSize: 8                        # Per-device batch size (8 per GPU × 4 GPUs)
+  gradientAccumulationSteps: 2        # Effective batch = 8 × 2 × 4 GPUs = 64
   learningRate: 3.0e-4
   weightDecay: 0.01
   warmupSteps: 200
@@ -39,8 +39,8 @@ training:
   fp16: false                         # Set true if GPU supports mixed precision
   bf16: true                          # Set true for Ampere+ GPUs (A100)
   loggingSteps: 10
-  saveSteps: 300
-  evaluationSteps: 300
+  saveSteps: 100
+  evaluationSteps: 100
   saveTotal: 3                        # Max checkpoints to keep
 
 # --- Generation ---

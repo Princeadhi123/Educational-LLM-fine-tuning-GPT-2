@@ -128,7 +128,9 @@ def createTrainingArguments(trainingConfig: dict) -> TrainingArguments:
         greater_is_better=False,
         report_to=["tensorboard"],
         dataloader_pin_memory=True,
+        dataloader_num_workers=4,
         remove_unused_columns=False,
+        ddp_find_unused_parameters=False,
     )
 
 
@@ -161,28 +163,42 @@ def main():
         print("Run 'python scripts/preprocess_data.py' first.")
         sys.exit(1)
 
+    # Detect distributed training (set by torchrun)
+    localRank = int(os.environ.get("LOCAL_RANK", -1))
+    isMainProcess = localRank in (-1, 0)
+
     # Detect device
     if torch.cuda.is_available():
-        deviceName = torch.cuda.get_device_name(0)
-        print(f"Using GPU: {deviceName}")
-        print(f"  VRAM: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
+        gpuCount = torch.cuda.device_count()
+        if isMainProcess:
+            for i in range(gpuCount):
+                deviceName = torch.cuda.get_device_name(i)
+                vram = torch.cuda.get_device_properties(i).total_memory / 1e9
+                print(f"GPU {i}: {deviceName} ({vram:.1f} GB)")
+            if gpuCount > 1:
+                print(f"  Distributed training: {gpuCount} GPUs")
     elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-        print("Using Apple MPS (Metal Performance Shaders)")
+        if isMainProcess:
+            print("Using Apple MPS (Metal Performance Shaders)")
     else:
-        print("Using CPU (training will be slow)")
-        print("TIP: Use Google Colab for free GPU access")
+        if isMainProcess:
+            print("Using CPU (training will be slow)")
+            print("TIP: Use Google Colab for free GPU access")
 
     # Load tokenizer
-    print(f"\nLoading tokenizer: {baseModelName}")
+    if isMainProcess:
+        print(f"\nLoading tokenizer: {baseModelName}")
     tokenizer = AutoTokenizer.from_pretrained(baseModelName)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    # Load model
-    print(f"Loading model: {baseModelName}")
+    # Load model — use bfloat16 on A100 GPUs for memory efficiency
+    if isMainProcess:
+        print(f"Loading model: {baseModelName}")
+    modelDtype = torch.bfloat16 if trainingConfig.get("bf16", False) else torch.float32
     model = AutoModelForCausalLM.from_pretrained(
         baseModelName,
-        torch_dtype=torch.float32,
+        torch_dtype=modelDtype,
     )
     model.resize_token_embeddings(len(tokenizer))
 
@@ -191,7 +207,8 @@ def main():
         model = setupLoraModel(model, loraConfig)
 
     # Load datasets
-    print(f"\nLoading datasets...")
+    if isMainProcess:
+        print(f"\nLoading datasets...")
     trainDataset = EducationalDataset(str(trainDataPath))
     validationDataset = EducationalDataset(str(validationDataPath))
 
@@ -228,47 +245,52 @@ def main():
     )
 
     # Train
-    print(f"\n{'='*50}")
-    print("Starting fine-tuning...")
-    print(f"  Model:          {baseModelName}")
-    print(f"  LoRA:           {'Yes' if useLoRA else 'No'}")
-    print(f"  Epochs:         {trainingConfig['numberOfEpochs']}")
-    print(f"  Batch size:     {trainingConfig['batchSize']}")
-    print(f"  Grad accum:     {trainingConfig['gradientAccumulationSteps']}")
-    print(f"  Effective batch: {trainingConfig['batchSize'] * trainingConfig['gradientAccumulationSteps']}")
-    print(f"  Learning rate:  {trainingConfig['learningRate']}")
-    print(f"  Train examples: {len(trainDataset)}")
-    print(f"  Val examples:   {len(validationDataset)}")
-    print(f"{'='*50}\n")
+    gpuCount = max(1, torch.cuda.device_count()) if torch.cuda.is_available() else 1
+    effectiveBatch = trainingConfig['batchSize'] * trainingConfig['gradientAccumulationSteps'] * gpuCount
+    if isMainProcess:
+        print(f"\n{'='*50}")
+        print("Starting fine-tuning...")
+        print(f"  Model:          {baseModelName}")
+        print(f"  LoRA:           {'Yes' if useLoRA else 'No'}")
+        print(f"  GPUs:           {gpuCount}")
+        print(f"  Epochs:         {trainingConfig['numberOfEpochs']}")
+        print(f"  Batch/GPU:      {trainingConfig['batchSize']}")
+        print(f"  Grad accum:     {trainingConfig['gradientAccumulationSteps']}")
+        print(f"  Effective batch: {effectiveBatch}")
+        print(f"  Learning rate:  {trainingConfig['learningRate']}")
+        print(f"  Train examples: {len(trainDataset)}")
+        print(f"  Val examples:   {len(validationDataset)}")
+        print(f"{'='*50}\n")
 
     resumeCheckpoint = arguments.resume
     trainer.train(resume_from_checkpoint=resumeCheckpoint)
 
-    # Save final model
-    finalModelDirectory = Path(trainingConfig["outputDirectory"]) / "final"
-    finalModelDirectory.mkdir(parents=True, exist_ok=True)
+    # Save final model (only on main process)
+    if isMainProcess:
+        finalModelDirectory = Path(trainingConfig["outputDirectory"]) / "final"
+        finalModelDirectory.mkdir(parents=True, exist_ok=True)
 
-    print(f"\nSaving final model to {finalModelDirectory}...")
-    if useLoRA:
-        # Save LoRA adapters
-        model.save_pretrained(str(finalModelDirectory))
-        tokenizer.save_pretrained(str(finalModelDirectory))
-        print("  Saved LoRA adapters (small file size)")
+        print(f"\nSaving final model to {finalModelDirectory}...")
+        if useLoRA:
+            # Save LoRA adapters
+            model.save_pretrained(str(finalModelDirectory))
+            tokenizer.save_pretrained(str(finalModelDirectory))
+            print("  Saved LoRA adapters (small file size)")
 
-        # Also save merged model for easy inference
-        mergedDirectory = Path(trainingConfig["outputDirectory"]) / "merged"
-        mergedDirectory.mkdir(parents=True, exist_ok=True)
-        print(f"  Merging LoRA weights into base model...")
-        mergedModel = model.merge_and_unload()
-        mergedModel.save_pretrained(str(mergedDirectory))
-        tokenizer.save_pretrained(str(mergedDirectory))
-        print(f"  Saved merged model to {mergedDirectory}")
-    else:
-        trainer.save_model(str(finalModelDirectory))
-        tokenizer.save_pretrained(str(finalModelDirectory))
+            # Also save merged model for easy inference
+            mergedDirectory = Path(trainingConfig["outputDirectory"]) / "merged"
+            mergedDirectory.mkdir(parents=True, exist_ok=True)
+            print(f"  Merging LoRA weights into base model...")
+            mergedModel = model.merge_and_unload()
+            mergedModel.save_pretrained(str(mergedDirectory))
+            tokenizer.save_pretrained(str(mergedDirectory))
+            print(f"  Saved merged model to {mergedDirectory}")
+        else:
+            trainer.save_model(str(finalModelDirectory))
+            tokenizer.save_pretrained(str(finalModelDirectory))
 
-    print(f"\nTraining complete!")
-    print(f"Next step: Run 'python scripts/generate.py --prompt \"Explain gravity\"'")
+        print(f"\nTraining complete!")
+        print(f"Next step: Run 'python scripts/generate.py --prompt \"Explain gravity\"'")
 
 
 if __name__ == "__main__":
