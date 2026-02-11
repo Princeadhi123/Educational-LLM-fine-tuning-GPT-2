@@ -5,9 +5,9 @@
 #SBATCH --time=02:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1        # 1 task — torchrun handles GPU workers
-#SBATCH --cpus-per-task=32         # CPUs for the Slurm task
-#SBATCH --gres=gpu:a100:4,nvme:3800  # 4 full A100 GPUs + NVMe
-#SBATCH --mem=490G                 # Request 490 GiB (max per node)
+#SBATCH --cpus-per-task=128        # All 128 cores on the node
+#SBATCH --gres=gpu:a100:4,nvme:3500  # 4 full A100 GPUs + 3.5TB NVMe (max)
+#SBATCH --mem=0                    # All available memory (~490 GiB)
 #SBATCH --output=logs/train_%j.out
 #SBATCH --error=logs/train_%j.err
 
