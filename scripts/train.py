@@ -32,7 +32,6 @@ from transformers import (
     AutoTokenizer,
     TrainingArguments,
     Trainer,
-    DataCollatorForLanguageModeling,
 )
 
 
@@ -196,11 +195,24 @@ def main():
     trainDataset = EducationalDataset(str(trainDataPath))
     validationDataset = EducationalDataset(str(validationDataPath))
 
-    # Data collator handles padding within batches
-    dataCollator = DataCollatorForLanguageModeling(
-        tokenizer=tokenizer,
-        mlm=False,  # Causal LM, not masked LM
-    )
+    # Custom data collator that pads variable-length sequences within each batch
+    padTokenId = tokenizer.pad_token_id
+
+    def dataCollator(features):
+        maxLength = max(len(f["input_ids"]) for f in features)
+        batchInputIds = []
+        batchAttentionMask = []
+        batchLabels = []
+        for f in features:
+            padLen = maxLength - len(f["input_ids"])
+            batchInputIds.append(f["input_ids"] + [padTokenId] * padLen)
+            batchAttentionMask.append(f["attention_mask"] + [0] * padLen)
+            batchLabels.append(f["labels"] + [-100] * padLen)
+        return {
+            "input_ids": torch.tensor(batchInputIds, dtype=torch.long),
+            "attention_mask": torch.tensor(batchAttentionMask, dtype=torch.long),
+            "labels": torch.tensor(batchLabels, dtype=torch.long),
+        }
 
     # Training arguments
     trainingArguments = createTrainingArguments(trainingConfig)
