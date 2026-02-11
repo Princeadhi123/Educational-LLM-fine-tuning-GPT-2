@@ -4,6 +4,173 @@
 
 This project fine-tunes a pre-trained GPT-2 model on educational content (textbooks, curricula, Q&A pairs, lesson plans) to create a specialized language model for school-level education. The model can then generate explanations, answer questions, summarize topics, and create quiz questions.
 
+## Architecture
+
+### End-to-End Pipeline
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        EDUCATIONAL LLM FINE-TUNING PIPELINE                │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+  ┌──────────────┐     ┌──────────────────┐     ┌──────────────┐
+  │  DATA SOURCES │     │  PREPROCESSING   │     │   TRAINING   │
+  │              │     │                  │     │              │
+  │  Wikipedia   │     │  Format → Unify  │     │  GPT-2 Base  │
+  │  SciQ/SQuAD  ├────►│  Tokenize (GPT2) ├────►│  + LoRA      │
+  │  Local Files │     │  Train/Val Split │     │  + Trainer   │
+  │  Textbooks   │     │                  │     │              │
+  └──────────────┘     └──────────────────┘     └──────┬───────┘
+                                                       │
+  collect_data.py       preprocess_data.py        train.py
+                                                       │
+                                                       ▼
+                       ┌──────────────────┐     ┌──────────────┐
+                       │    INFERENCE     │     │ CHECKPOINTS  │
+                       │                  │     │              │
+                       │  User Prompt     │     │  LoRA Adaptr │
+                       │  → Format        │◄────│  Merged Model│
+                       │  → Generate      │     │  Best Ckpt   │
+                       │  → Clean Output  │     │              │
+                       └──────────────────┘     └──────────────┘
+                                                       
+                        generate.py              models/checkpoints/
+```
+
+### Model Architecture (GPT-2 + LoRA)
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    GPT-2 Transformer (124M params)          │
+│                                                             │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │  Token Embeddings (50257 vocab) + Position Embeddings │  │
+│  └───────────────────────┬───────────────────────────────┘  │
+│                          │                                  │
+│  ┌───────────────────────▼───────────────────────────────┐  │
+│  │              Transformer Block × 12                   │  │
+│  │                                                       │  │
+│  │  ┌─────────────────────────────────────────────────┐  │  │
+│  │  │  Multi-Head Self-Attention                      │  │  │
+│  │  │  ┌─────────┐                                    │  │  │
+│  │  │  │ c_attn  │◄── LoRA Adapter (rank=64)         │  │  │
+│  │  │  └─────────┘                                    │  │  │
+│  │  │  ┌─────────┐                                    │  │  │
+│  │  │  │ c_proj  │◄── LoRA Adapter (rank=64)         │  │  │
+│  │  │  └─────────┘                                    │  │  │
+│  │  └─────────────────────────────────────────────────┘  │  │
+│  │                                                       │  │
+│  │  ┌─────────────────────────────────────────────────┐  │  │
+│  │  │  Feed-Forward Network (MLP)                     │  │  │
+│  │  │  ┌─────────┐                                    │  │  │
+│  │  │  │  c_fc   │◄── LoRA Adapter (rank=64)         │  │  │
+│  │  │  └─────────┘                                    │  │  │
+│  │  │  ┌─────────┐                                    │  │  │
+│  │  │  │ c_proj  │    (shared with attention c_proj)  │  │  │
+│  │  │  └─────────┘                                    │  │  │
+│  │  └─────────────────────────────────────────────────┘  │  │
+│  │                                                       │  │
+│  │  LayerNorm + Residual Connections                     │  │
+│  └───────────────────────────────────────────────────────┘  │
+│                          │                                  │
+│  ┌───────────────────────▼───────────────────────────────┐  │
+│  │           LM Head → Next Token Prediction             │  │
+│  └───────────────────────────────────────────────────────┘  │
+│                                                             │
+│  Frozen params: ~124M  │  LoRA trainable: ~6.5M (~5%)      │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Data Flow
+
+```
+┌─────────────┐    ┌──────────────────────────────────────────────────┐
+│  Raw Input   │    │  Preprocessing (preprocess_data.py)              │
+│              │    │                                                  │
+│  Instruction │    │  "Explain gravity" + "Gravity is a force..."    │
+│  Response    │    │         │                                        │
+│  Plain Text  │    │         ▼                                        │
+│  Dialogue    │    │  "### Instruction:\nExplain gravity\n\n          │
+│              │    │   ### Response:\nGravity is a force...\n         │
+└──────┬───────┘    │   ### End"                                       │
+       │            │         │                                        │
+       └───────────►│         ▼                                        │
+                    │  Tokenizer (GPT-2 BPE)                          │
+                    │  [21017, 46901, ...] → input_ids                │
+                    │  [1, 1, 1, ...]      → attention_mask           │
+                    │  [21017, 46901, ...] → labels                   │
+                    │         │                                        │
+                    │         ▼                                        │
+                    │  Train/Val Split (90/10)                         │
+                    │  train.jsonl (11,055 examples)                   │
+                    │  validation.jsonl (1,229 examples)               │
+                    └──────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│  Training Loop (train.py)                                           │
+│                                                                     │
+│  ┌──────────┐   ┌───────────┐   ┌──────────┐   ┌───────────────┐  │
+│  │  Batch   │   │  Custom   │   │  Forward  │   │   Backward    │  │
+│  │  Sampler │──►│  Collator │──►│  Pass     │──►│   + Optimizer │  │
+│  │  (size=2)│   │  (pad)    │   │  (loss)   │   │   (AdamW)     │  │
+│  └──────────┘   └───────────┘   └──────────┘   └───────────────┘  │
+│                                                                     │
+│  Effective Batch: 2 × 8 (grad accum) = 16                          │
+│  LR Schedule: Linear warmup (200 steps) → Cosine decay             │
+│  Mixed Precision: bf16 (A100 GPU)                                   │
+│  Eval: Every 300 steps → Save best checkpoint (lowest eval_loss)    │
+└──────────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│  Inference (generate.py)                                            │
+│                                                                     │
+│  User: "Explain gravity"                                            │
+│         │                                                           │
+│         ▼                                                           │
+│  "### Instruction:\nExplain gravity\n\n### Response:\n"             │
+│         │                                                           │
+│         ▼                                                           │
+│  ┌─────────────────────────────────────────────────────────┐        │
+│  │  model.generate(temperature=0.4, top_p=0.9, top_k=50)  │        │
+│  │  repetition_penalty=1.3, max_new_tokens=256             │        │
+│  └─────────────────────────────────────────────────────────┘        │
+│         │                                                           │
+│         ▼                                                           │
+│  Clean output: strip "### End" markers → Final response             │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+### Configuration (training_config.yaml)
+
+```
+┌──────────────────────────────────────────────────────────┐
+│                    training_config.yaml                   │
+│                                                          │
+│  ┌────────────┐  ┌────────────┐  ┌────────────────────┐ │
+│  │   Model     │  │   LoRA     │  │     Training       │ │
+│  │            │  │            │  │                    │ │
+│  │  gpt2      │  │  rank: 64  │  │  epochs: 5        │ │
+│  │  seq: 512  │  │  alpha:128 │  │  batch: 2         │ │
+│  │  LoRA: yes │  │  drop: 0.1 │  │  grad_accum: 8    │ │
+│  │            │  │  targets:  │  │  lr: 3e-4         │ │
+│  │            │  │   c_attn   │  │  warmup: 200      │ │
+│  │            │  │   c_proj   │  │  bf16: true       │ │
+│  │            │  │   c_fc     │  │  eval: 300 steps  │ │
+│  └────────────┘  └────────────┘  └────────────────────┘ │
+│                                                          │
+│  ┌────────────────────┐  ┌────────────────────────────┐ │
+│  │    Data             │  │    Generation              │ │
+│  │                    │  │                            │ │
+│  │  raw: data/raw     │  │  temperature: 0.4         │ │
+│  │  proc: data/proc   │  │  top_p: 0.9              │ │
+│  │  split: 90/10      │  │  top_k: 50               │ │
+│  │  format: instruct  │  │  rep_penalty: 1.3        │ │
+│  └────────────────────┘  └────────────────────────────┘ │
+└──────────────────────────────────────────────────────────┘
+```
+
 ## Project Structure
 
 ```
