@@ -1,0 +1,11 @@
+{
+  "trainExamples": 11055,
+  "validationExamples": 1229,
+  "totalTrainTokens": 1493215,
+  "totalValidationTokens": 166787,
+  "averageTrainLength": 135.07146087743104,
+  "averageValidationLength": 135.70951993490644,
+  "maxTrainLength": 512,
+  "minTrainLength": 16,
+  "vocabularySize": 50257
+}

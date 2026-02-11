@@ -1,0 +1,17 @@
+The Solar System
+
+The solar system consists of the Sun and everything that orbits around it, including eight planets, their moons, dwarf planets, asteroids, and comets. The Sun is a star at the center of our solar system, and it contains 99.86% of the total mass of the entire system.
+
+The eight planets, in order from the Sun, are Mercury, Venus, Earth, Mars, Jupiter, Saturn, Uranus, and Neptune. The first four planets (Mercury, Venus, Earth, and Mars) are called terrestrial planets because they have solid, rocky surfaces. The outer four planets (Jupiter, Saturn, Uranus, and Neptune) are called gas giants or ice giants because they are much larger and made mostly of gases and ices.
+
+Earth is the third planet from the Sun and the only known planet to support life. It has liquid water on its surface, a breathable atmosphere, and a magnetic field that protects it from harmful solar radiation.
+
+---
+
+Fractions and Decimals
+
+A fraction represents a part of a whole. It is written as two numbers separated by a line: the numerator (top number) tells how many parts you have, and the denominator (bottom number) tells how many equal parts the whole is divided into. For example, 3/4 means you have 3 out of 4 equal parts.
+
+A decimal is another way to represent a fraction or part of a whole, using a decimal point. For example, 0.75 is the same as 3/4. To convert a fraction to a decimal, divide the numerator by the denominator: 3 ÷ 4 = 0.75.
+
+To convert a decimal to a fraction, look at the place value. For example, 0.5 means 5 tenths, which is 5/10, which simplifies to 1/2.

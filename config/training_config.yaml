@@ -1,0 +1,52 @@
+# ============================================================
+# Training Configuration for Educational LLM Fine-Tuning
+# ============================================================
+
+# --- Model ---
+model:
+  baseName: "gpt2"                    # Options: gpt2, gpt2-medium, gpt2-large
+  maxSequenceLength: 512              # Max tokens per training example
+  useLoRA: true                       # Use LoRA for parameter-efficient fine-tuning
+
+# --- LoRA Configuration ---
+lora:
+  rank: 16                            # LoRA rank (higher = more capacity, more memory)
+  alpha: 32                           # LoRA alpha scaling factor
+  dropout: 0.05                       # LoRA dropout
+  targetModules:                      # Which layers to apply LoRA to
+    - "c_attn"
+    - "c_proj"
+
+# --- Data ---
+data:
+  rawDirectory: "data/raw"            # Where raw text/JSON files live
+  processedDirectory: "data/processed"  # Where tokenized datasets are saved
+  trainSplit: 0.9                     # Train/validation split ratio
+  dataFormat: "instruction"           # Options: instruction, plain_text, conversation
+
+# --- Training ---
+training:
+  outputDirectory: "models/checkpoints"
+  loggingDirectory: "logs"
+  numberOfEpochs: 3
+  batchSize: 4                        # Per-device batch size
+  gradientAccumulationSteps: 4        # Effective batch = batchSize * gradientAccumulation
+  learningRate: 2.0e-4
+  weightDecay: 0.01
+  warmupSteps: 100
+  maxGradientNorm: 1.0
+  fp16: false                         # Set true if GPU supports mixed precision
+  bf16: false                         # Set true for Ampere+ GPUs
+  loggingSteps: 10
+  saveSteps: 500
+  evaluationSteps: 500
+  saveTotal: 3                        # Max checkpoints to keep
+
+# --- Generation ---
+generation:
+  maxNewTokens: 256
+  temperature: 0.7
+  topP: 0.9
+  topK: 50
+  repetitionPenalty: 1.2
+  doSample: true
