@@ -55,9 +55,9 @@ class EducationalDataset(Dataset):
     def __getitem__(self, index: int) -> dict:
         example = self.examples[index]
         return {
-            "input_ids": torch.tensor(example["input_ids"], dtype=torch.long),
-            "attention_mask": torch.tensor(example["attention_mask"], dtype=torch.long),
-            "labels": torch.tensor(example["labels"], dtype=torch.long),
+            "input_ids": example["input_ids"],
+            "attention_mask": example["attention_mask"],
+            "labels": example["labels"],
         }
 
 
