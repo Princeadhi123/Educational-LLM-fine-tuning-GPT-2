@@ -36,7 +36,7 @@ training:
   warmupSteps: 100
   maxGradientNorm: 1.0
   fp16: false                         # Set true if GPU supports mixed precision
-  bf16: false                         # Set true for Ampere+ GPUs
+  bf16: true                          # Set true for Ampere+ GPUs (A100)
   loggingSteps: 10
   saveSteps: 500
   evaluationSteps: 500
